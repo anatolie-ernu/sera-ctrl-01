@@ -1,0 +1,111 @@
+============================================================
+SERA INTELIGENTA - ETAPA 1
+Fișier: schema_conexiuni.txt
+Descriere: Schema de cablare ESP32 ↔ Hardware
+============================================================
+
+╔══════════════════════════════════════════════════════════════╗
+║                  SCHEMA CONEXIUNI ESP32                      ║
+╚══════════════════════════════════════════════════════════════╝
+
+┌─────────────────────────────────────────────────────────┐
+│                        ESP32                            │
+│                                                         │
+│  3.3V ──────────────────── VCC DHT22                   │
+│  GND  ──────────────────── GND DHT22                   │
+│  GPIO 4 ─────────────────── DATA DHT22 (+ 10kΩ la 3.3V)│
+│                                                         │
+│  3.3V ──────────────────── VCC Soil Sensor              │
+│  GND  ──────────────────── GND Soil Sensor              │
+│  GPIO 34 (ADC) ──────────── AO  Soil Sensor             │
+│                                                         │
+│  GPIO 16 ────────────────── IN1 Modul Releu (Fereastra1)│
+│  GPIO 17 ────────────────── IN2 Modul Releu (Fereastra2)│
+│  GPIO 18 ────────────────── IN3 Modul Releu (Pompă)     │
+│  GPIO 19 ────────────────── IN4 Modul Releu (Fan1)      │
+│  GPIO 21 ────────────────── IN5 Modul Releu (Fan2)      │
+│                                                         │
+│  GPIO 2  ────────────────── LED Status (intern)         │
+│                                                         │
+│  5V (Vin)────────────────── VCC Modul Releu             │
+│  GND  ──────────────────── GND Modul Releu              │
+└─────────────────────────────────────────────────────────┘
+
+╔══════════════════════════════════════════════════════════════╗
+║                  MODUL RELEU 5 CANALE                        ║
+╚══════════════════════════════════════════════════════════════╝
+
+Releul 1 (GPIO 16) → Motor Fereastră 1 (230V AC)
+   COM  ──── Fir alimentare 230V (L)
+   NO   ──── Motor fereastra 1 (deschide)
+   NC   ──── (neutilizat)
+
+Releul 2 (GPIO 17) → Motor Fereastră 2 (230V AC)
+   COM  ──── Fir alimentare 230V (L)
+   NO   ──── Motor fereastra 2 (deschide)
+   NC   ──── (neutilizat)
+
+Releul 3 (GPIO 18) → Robinet Electric 220V
+   COM  ──── Fir alimentare 230V (L)
+   NO   ──── Robinet electric / pompă apă
+   NC   ──── (neutilizat) - sigur la întrerupere curent
+
+Releul 4 (GPIO 19) → Ventilator 1 (230V AC)
+   COM  ──── Fir alimentare 230V (L)
+   NO   ──── Ventilator 1
+   NC   ──── (neutilizat)
+
+Releul 5 (GPIO 21) → Ventilator 2 (230V AC)
+   COM  ──── Fir alimentare 230V (L)
+   NO   ──── Ventilator 2
+   NC   ──── (neutilizat)
+
+N (Neutru) ─────────────── Direct la toate aparatele
+
+╔══════════════════════════════════════════════════════════════╗
+║              SENZOR DHT22 - DETALII                          ║
+╚══════════════════════════════════════════════════════════════╝
+
+DHT22 are 4 pini:
+  Pin 1 (VCC)  → 3.3V ESP32
+  Pin 2 (DATA) → GPIO 4 ESP32 + rezistență pull-up 10kΩ la 3.3V
+  Pin 3 (NC)   → neconectat
+  Pin 4 (GND)  → GND ESP32
+
+Schema rezistență pull-up:
+  3.3V ──┬─── DHT22 Pin 2 (DATA)
+         │
+       10kΩ
+         │
+  GPIO4 ─┘
+
+╔══════════════════════════════════════════════════════════════╗
+║           SENZOR UMIDITATE SOL - DETALII                     ║
+╚══════════════════════════════════════════════════════════════╝
+
+Senzor capacitiv de sol (recomandat față de cel rezistiv):
+  VCC  → 3.3V ESP32 (unele modele necesită 5V - verifică datasheet)
+  GND  → GND ESP32
+  AOUT → GPIO 34 ESP32 (pin ADC-only, nu poate fi output)
+
+CALIBRARE NECESARĂ (în config.h):
+  1. Pune senzorul în aer → citește valoarea ADC → acesta e ADC_DRY
+  2. Pune senzorul în apă → citești valoarea ADC → acesta e ADC_WET
+  3. Actualizează în sensors.cpp: ADC_DRY și ADC_WET
+
+╔══════════════════════════════════════════════════════════════╗
+║                    ATENȚIE SIGURANȚĂ!                        ║
+╚══════════════════════════════════════════════════════════════╝
+
+⚠️  Tensiunea de 220-230V AC POATE FI LETALĂ!
+⚠️  Lucrați FĂRĂ tensiune când faceți conexiunile 220V!
+⚠️  Folosiți o carcasă etanșă IP65+ pentru mediu umed (seră)!
+⚠️  Separați fizic circuitul 5V/3.3V de cel de 220V!
+⚠️  Folosiți siguranțe fuzibile pe circuitul de 220V!
+⚠️  Verificați că releele sunt RATED pentru 220V AC / curentul aparatelor!
+
+Putere tipică:
+  - Motor fereastră: 20-50W
+  - Robinet electric: 5-10W
+  - Ventilator: 20-100W
+  Total maxim: ~300W → releu minim 10A/250V
