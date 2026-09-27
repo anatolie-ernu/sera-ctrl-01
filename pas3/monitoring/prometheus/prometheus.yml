@@ -1,0 +1,19 @@
+# prometheus.yml — colecteaza metrici de la backend la 15s
+global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+
+scrape_configs:
+  - job_name: 'sera-backend'
+    static_configs:
+      - targets: ['backend:3000']
+    metrics_path: /metrics
+
+  # Auto-monitorizare Prometheus
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+# Reguli de alertare la nivel de infrastructura (complementar alertelor de seră)
+rule_files:
+  - /etc/prometheus/alert_rules.yml

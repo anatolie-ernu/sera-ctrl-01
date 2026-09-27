@@ -1,0 +1,25 @@
+# alert_rules.yml — alerte de infrastructura (flota, nu plante)
+groups:
+  - name: sera_fleet
+    rules:
+      - alert: BackendDown
+        expr: up{job="sera-backend"} == 0
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "Backend-ul Sera este indisponibil de 2 minute"
+
+      - alert: ManyDevicesOffline
+        # >30% din flota offline = posibila problema de retea/broker
+        expr: (sera_devices_total - sera_devices_online) / sera_devices_total > 0.30
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Peste 30% din dispozitive sunt offline"
+
+      - alert: OtaFailureSpike
+        expr: sera_ota_state{state="failed"} > 5
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Peste 5 dispozitive au esuat la actualizarea OTA — opriti rollout-ul"
