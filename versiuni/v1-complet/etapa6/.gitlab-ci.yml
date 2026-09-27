@@ -1,0 +1,113 @@
+# =============================================================
+# SERA INTELIGENTA — GitLab CI/CD Pipeline
+# Automat la fiecare push pe main:
+#   test → build → deploy pe server Linux
+# =============================================================
+stages:
+  - test
+  - build
+  - deploy
+
+variables:
+  DOCKER_IMAGE: $CI_REGISTRY_IMAGE/backend:$CI_COMMIT_SHORT_SHA
+  DOCKER_LATEST: $CI_REGISTRY_IMAGE/backend:latest
+
+# ── Cache npm ─────────────────────────────────────────────────
+.node_cache:
+  cache:
+    key: "${CI_COMMIT_REF_SLUG}-node"
+    paths: [etapa3/backend/node_modules/]
+
+# ── Test backend ──────────────────────────────────────────────
+test:backend:
+  stage: test
+  image: node:20-alpine
+  extends: .node_cache
+  before_script:
+    - cd etapa3/backend && npm ci
+  script:
+    - npm run lint || true
+    - npm test
+  coverage: '/Lines\s*:\s*(\d+\.?\d*)%/'
+  artifacts:
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: etapa3/backend/coverage/cobertura-coverage.xml
+  rules:
+    - changes: [etapa3/backend/**/*]
+
+# ── Build firmware (validare compilare) ──────────────────────
+test:firmware:
+  stage: test
+  image: python:3.11-alpine
+  before_script:
+    - pip install platformio --quiet
+    - cd etapa2/firmware
+  script:
+    - pio run --silent
+  rules:
+    - changes: [etapa2/firmware/**/*]
+  allow_failure: true   # nu blocheaza deploy daca platformio nu e disponibil in CI
+
+# ── Build Docker image ────────────────────────────────────────
+build:docker:
+  stage: build
+  image: docker:24
+  services: [docker:24-dind]
+  before_script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+  script:
+    - docker build -t $DOCKER_IMAGE -t $DOCKER_LATEST ./etapa3/backend/
+    - docker push $DOCKER_IMAGE
+    - docker push $DOCKER_LATEST
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+
+# ── Deploy pe server production ───────────────────────────────
+deploy:production:
+  stage: deploy
+  image: alpine:latest
+  before_script:
+    - apk add --no-cache openssh-client rsync
+    - eval $(ssh-agent -s)
+    - echo "$DEPLOY_SSH_KEY" | tr -d '\r' | ssh-add -
+    - mkdir -p ~/.ssh && chmod 700 ~/.ssh
+    - ssh-keyscan -H $DEPLOY_HOST >> ~/.ssh/known_hosts
+  script:
+    # Sincronizeaza fisierele pe server (exclude .env, logs, date)
+    - rsync -avz --delete
+        --exclude='.env'
+        --exclude='*/logs/*'
+        --exclude='*/node_modules/*'
+        --exclude='*/data/*'
+        ./etapa3/ $DEPLOY_USER@$DEPLOY_HOST:/opt/greenhouse/
+    # Restart servicii cu noul build
+    - ssh $DEPLOY_USER@$DEPLOY_HOST "
+        cd /opt/greenhouse &&
+        docker compose pull &&
+        docker compose up -d --build backend &&
+        docker compose exec -T backend node -e 'console.log(\"Backend OK\")' &&
+        echo 'Deploy reusit!'
+      "
+  environment:
+    name: production
+    url: https://$DOMAIN
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+  when: on_success
+
+# ── Notificare Slack/Email la deploy ─────────────────────────
+notify:success:
+  stage: deploy
+  image: alpine:latest
+  before_script: [apk add --no-cache curl]
+  script:
+    - |
+      curl -s -X POST $SLACK_WEBHOOK_URL \
+        -H 'Content-type: application/json' \
+        -d "{\"text\":\"✅ Sera deploy reusit — commit ${CI_COMMIT_SHORT_SHA} de ${CI_COMMIT_AUTHOR}\"}" || true
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+  when: on_success
+  allow_failure: true

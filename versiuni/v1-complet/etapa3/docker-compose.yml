@@ -1,0 +1,133 @@
+version: '3.9'
+# =============================================================
+# SERA INTELIGENTA — Docker Compose cu TimescaleDB
+# Start: ./scripts/start.sh
+# Stop:  ./scripts/stop.sh
+# Logs:  docker compose logs -f backend
+# =============================================================
+services:
+
+  # ── TimescaleDB (PostgreSQL + time-series superpowers) ─────
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: sera_tsdb
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB:       ${POSTGRES_DB}
+      POSTGRES_USER:     ${POSTGRES_USER}
+      TIMESCALEDB_TELEMETRY: "off"
+    volumes:
+      - tsdb_data:/var/lib/postgresql/data
+      - ./backend/db/init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+    networks: [sera_net]
+
+  # ── MQTT Broker ────────────────────────────────────────────
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: sera_mqtt
+    restart: unless-stopped
+    volumes:
+      - ./docker/mosquitto/config:/mosquitto/config:ro
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_log:/mosquitto/log
+    ports:
+      - "1883:1883"
+      - "127.0.0.1:9001:9001"
+    networks: [sera_net]
+
+  # ── Redis ──────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: sera_redis
+    restart: unless-stopped
+    command: redis-server --requirepass ${REDIS_PASSWORD} --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    networks: [sera_net]
+
+  # ── Backend Node.js ────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: production
+    container_name: sera_backend
+    restart: unless-stopped
+    depends_on:
+      timescaledb: {condition: service_healthy}
+      mosquitto:   {condition: service_started}
+      redis:       {condition: service_started}
+    environment:
+      NODE_ENV:        production
+      PORT:            3000
+      DB_HOST:         timescaledb
+      DB_PORT:         5432
+      DB_NAME:         ${POSTGRES_DB}
+      DB_USER:         ${POSTGRES_USER}
+      DB_PASS:         ${POSTGRES_PASSWORD}
+      MQTT_HOST:       mosquitto
+      MQTT_PORT:       1883
+      MQTT_USER:       ${MQTT_USER}
+      MQTT_PASS:       ${MQTT_PASS}
+      REDIS_URL:       redis://:${REDIS_PASSWORD}@redis:6379
+      JWT_SECRET:      ${JWT_SECRET}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+      SMTP_HOST:       ${SMTP_HOST}
+      SMTP_PORT:       ${SMTP_PORT}
+      SMTP_USER:       ${SMTP_USER}
+      SMTP_PASS:       ${SMTP_PASS}
+      SMTP_FROM:       ${SMTP_FROM}
+      SMS_PROVIDER:    ${SMS_PROVIDER}
+      SMS_ACCOUNT_SID: ${SMS_ACCOUNT_SID:-}
+      SMS_API_KEY:     ${SMS_API_KEY:-}
+      SMS_FROM:        ${SMS_FROM:-}
+      LOG_LEVEL:       ${LOG_LEVEL:-info}
+    volumes:
+      - ./backend/logs:/app/logs
+    networks: [sera_net]
+
+  # ── Nginx ──────────────────────────────────────────────────
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: sera_nginx
+    restart: unless-stopped
+    depends_on: [backend]
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/nginx:/etc/nginx/conf.d:ro
+      - certbot_web:/var/www/certbot
+      - certbot_certs:/etc/letsencrypt:ro
+    networks: [sera_net]
+
+  # ── Certbot (SSL auto-renew) ───────────────────────────────
+  certbot:
+    image: certbot/certbot
+    container_name: sera_certbot
+    restart: unless-stopped
+    volumes:
+      - certbot_web:/var/www/certbot
+      - certbot_certs:/etc/letsencrypt
+    entrypoint: /bin/sh -c "trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot -q; sleep 12h & wait; done"
+    networks: [sera_net]
+
+volumes:
+  tsdb_data:
+  mosquitto_data:
+  mosquitto_log:
+  redis_data:
+  certbot_web:
+  certbot_certs:
+
+networks:
+  sera_net:
+    driver: bridge
