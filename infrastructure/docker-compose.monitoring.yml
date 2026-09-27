@@ -1,0 +1,34 @@
+# docker-compose.monitoring.yml — adauga monitoring la stack-ul existent
+# Pornire:  docker compose -f docker-compose.yml -f monitoring/docker-compose.monitoring.yml up -d
+version: '3.9'
+services:
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: sera_prometheus
+    restart: unless-stopped
+    volumes:
+      - ./monitoring/prometheus:/etc/prometheus:ro
+      - prom_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.retention.time=90d'
+    networks: [sera_net]
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: sera_grafana
+    restart: unless-stopped
+    depends_on: [prometheus]
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-changeme}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+    ports:
+      - "127.0.0.1:3001:3000"   # expus doar pe localhost; acces prin tunel SSH
+    networks: [sera_net]
+
+volumes:
+  prom_data:
+  grafana_data:
